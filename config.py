@@ -34,31 +34,40 @@ ALLOWED_EXTENSIONS = [
     ".xml", ".svg", ".lock", ".sum",
 ]
 
-# ─── GPU-ONLY Generation Parameters ─────────────────────────────
+# ─── ALL AI MODELS → GPU | WEB SERVER → CPU ────────────────────
+
+# 32b Coder Model → GPU (main heavy coding work)
 CODER_OPTIONS = {
-    "temperature": 0.15,       # Lower = faster, more deterministic
+    "temperature": 0.15,
     "top_p": 0.85,
-    "top_k": 30,               # Limit token sampling for speed
-    "num_predict": 4096,       # Enough for most actions
-    "num_ctx": 8192,           # Balanced context window
+    "top_k": 30,
+    "num_predict": 4096,
+    "num_ctx": 8192,
     "repeat_penalty": 1.05,
-    "num_gpu": 99,             # ★ ALL layers on GPU — no CPU inference
-    "main_gpu": 0,             # ★ Use primary GPU (device 0)
-    "num_thread": 1,           # ★ Minimal CPU threads (GPU handles everything)
-    "num_batch": 512,          # ★ Larger batch = faster prompt processing on GPU
+    "num_gpu": 99,             # ★ ALL layers on GPU
+    "main_gpu": 0,
+    "num_thread": 1,           # ★ Minimal CPU (GPU handles inference)
+    "num_batch": 512,
     "mirostat": 0,
-    "low_vram": False,         # ★ Don't save VRAM — use full GPU memory for speed
-    "f16_kv": True,            # ★ FP16 KV cache on GPU — faster + less VRAM
+    "low_vram": False,
+    "f16_kv": True,
 }
 
+# 14b Reviewer Model → GPU (review work)
 REVIEWER_OPTIONS = {
     "temperature": 0.3,
     "top_p": 0.9,
     "num_predict": 2048,
     "num_ctx": 4096,
     "num_gpu": 99,             # ★ ALL layers on GPU
-    "main_gpu": 0,             # ★ Use primary GPU
-    "num_thread": 1,           # ★ Minimal CPU threads
-    "num_batch": 512,          # ★ Larger batch for speed
-    "f16_kv": True,            # ★ FP16 KV cache
+    "main_gpu": 0,
+    "num_thread": 1,           # ★ Minimal CPU (GPU handles inference)
+    "num_batch": 512,
+    "f16_kv": True,
 }
+
+# Note: Web server (server.py) runs on CPU automatically.
+# Python HTTP + SSE streaming = lightweight CPU work.
+# All AI inference = GPU only.
+
+
