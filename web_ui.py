@@ -776,8 +776,67 @@ let timerInt = null;
 let tokenCount = 0;
 let stats = { iter: 0, files: 0, cmds: 0, errors: 0 };
 let currentTab = 'stream';
-let tabContent = { stream: '', code: '', terminal: '' };
 let lastCodeContent = '';
+
+// ─── PERFORMANCE: Token batching to prevent crash ───
+let tokenBuffer = [];
+let renderScheduled = false;
+const MAX_STREAM_NODES = 600;  // Max DOM nodes in stream
+let streamNodeCount = 0;
+
+function scheduleRender() {
+  if (renderScheduled) return;
+  renderScheduled = true;
+  requestAnimationFrame(flushTokens);
+}
+
+function flushTokens() {
+  renderScheduled = false;
+  if (tokenBuffer.length === 0) return;
+
+  const area = $('codeArea');
+  const frag = document.createDocumentFragment();
+
+  for (const item of tokenBuffer) {
+    if (item.type === 'html') {
+      const div = document.createElement('div');
+      div.innerHTML = item.content;
+      while (div.firstChild) {
+        frag.appendChild(div.firstChild);
+        streamNodeCount++;
+      }
+    } else {
+      const span = document.createElement('span');
+      span.className = item.cls || '';
+      span.textContent = item.content;
+      frag.appendChild(span);
+      streamNodeCount++;
+    }
+  }
+  tokenBuffer = [];
+
+  // Remove old nodes to keep DOM small
+  while (streamNodeCount > MAX_STREAM_NODES && area.firstChild) {
+    area.removeChild(area.firstChild);
+    streamNodeCount--;
+  }
+
+  // Remove old cursor
+  const oldCursor = area.querySelector('.cursor-blink');
+  if (oldCursor) oldCursor.remove();
+
+  area.appendChild(frag);
+
+  // Add cursor
+  if (running) {
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor-blink';
+    area.appendChild(cursor);
+  }
+
+  // Auto-scroll
+  area.scrollTop = area.scrollHeight;
+}
 
 // ─── Tab switching ──────────────────────────────
 function switchTab(name) {
@@ -785,14 +844,17 @@ function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => {
     t.classList.toggle('active', t.dataset.tab === name);
   });
-  renderTab();
+  if (name === 'stream') {
+    // Already live DOM
+  } else if (name === 'code') {
+    $('codeArea').innerHTML = codeTabHTML || '<span style="color:var(--text-3)">No code yet</span>';
+  } else if (name === 'terminal') {
+    $('codeArea').innerHTML = terminalHTML || '<span style="color:var(--text-3)">No terminal output yet</span>';
+  }
 }
 
-function renderTab() {
-  const area = $('codeArea');
-  area.innerHTML = tabContent[currentTab] || '<span style="color:var(--text-3)">Nothing here yet</span>';
-  area.scrollTop = area.scrollHeight;
-}
+let codeTabHTML = '';
+let terminalHTML = '';
 
 // ─── Status ─────────────────────────────────────
 function setStatus(label, type) {
@@ -833,27 +895,21 @@ function addActivity(icon, cls, text) {
     <div class="activity-text">${esc(text)}</div>
     <div class="activity-time">${now}</div>`;
   feed.prepend(item);
-  if (feed.children.length > 50) feed.lastChild.remove();
+  // Limit feed size
+  while (feed.children.length > 30) feed.lastChild.remove();
 }
 
-// ─── Stream append ──────────────────────────────
+// ─── Stream append (batched) ────────────────────
 function appendStream(html) {
-  tabContent.stream += html;
-  if (currentTab === 'stream') {
-    const area = $('codeArea');
-    area.innerHTML = tabContent.stream + '<span class="cursor-blink"></span>';
-    area.scrollTop = area.scrollHeight;
-  }
+  if (currentTab !== 'stream') return;
+  tokenBuffer.push({ type: 'html', content: html });
+  scheduleRender();
 }
 
-function appendTerminal(html) {
-  tabContent.terminal += html;
-  if (currentTab === 'terminal') renderTab();
-}
-
-function setCodeTab(html) {
-  tabContent.code = html;
-  if (currentTab === 'code') renderTab();
+function appendToken(text, cls) {
+  if (currentTab !== 'stream') return;
+  tokenBuffer.push({ type: 'text', content: text, cls: cls });
+  scheduleRender();
 }
 
 function esc(s) {
@@ -882,13 +938,12 @@ function refreshFiles(files) {
 }
 
 function requestFile(path) {
-  // File click → show in code tab
   fetch('/api/file?path=' + encodeURIComponent(path))
     .then(r => r.json())
     .then(data => {
       if (data.content !== undefined) {
-        setCodeTab('<div style="color:var(--text-3);margin-bottom:8px;font-size:11px;">📄 ' + esc(path) + '</div>'
-          + '<div style="color:var(--text-1)">' + esc(data.content) + '</div>');
+        codeTabHTML = '<div style="color:var(--text-3);margin-bottom:8px;font-size:11px;">📄 ' + esc(path) + '</div>'
+          + '<div style="color:var(--text-1)">' + esc(data.content) + '</div>';
         switchTab('code');
       }
     }).catch(() => {});
@@ -902,7 +957,10 @@ async function startAgent() {
   running = true;
   stats = { iter: 0, files: 0, cmds: 0, errors: 0 };
   tokenCount = 0;
-  tabContent = { stream: '', code: '', terminal: '' };
+  tokenBuffer = [];
+  streamNodeCount = 0;
+  codeTabHTML = '';
+  terminalHTML = '';
   startTime = Date.now();
   timerInt = setInterval(updateTimer, 1000);
 
@@ -911,11 +969,13 @@ async function startAgent() {
   $('goalInput').disabled = true;
   $('progressBar').classList.add('active');
   $('progressFill').style.width = '100%';
+  $('codeArea').innerHTML = '';
 
   setStatus('RUNNING', 'running');
   updateStats();
 
   appendStream('<div class="iteration-banner">Agent Starting</div>');
+  appendStream('<span style="color:var(--text-2)">Goal: ' + esc(goal) + '</span>\n');
   addActivity('🚀', 'create', 'Agent started: ' + goal.slice(0, 60));
 
   try {
@@ -960,11 +1020,11 @@ function handleEvent(ev) {
 
     case 'token':
       tokenCount++;
-      $('hdrTokens').textContent = tokenCount;
+      if (tokenCount % 20 === 0) $('hdrTokens').textContent = tokenCount;
       const cls = ev.section === 'thinking' ? 'token-thinking' :
                   ev.section === 'action' ? 'token-action' :
                   ev.section === 'plan' ? 'token-plan' : 'token';
-      appendStream('<span class="' + cls + '">' + esc(ev.text) + '</span>');
+      appendToken(ev.text, cls);
       break;
 
     case 'section':
@@ -994,12 +1054,14 @@ function handleEvent(ev) {
     case 'result':
       const rIcon = ev.success ? '✅' : '❌';
       const rCls = ev.success ? 'token' : 'token-error';
+      // Truncate long output for DOM safety
+      const output = (ev.output || '').slice(0, 1500);
       appendStream('\n<div class="section-marker ' + (ev.success ? 'result' : 'error') + '">'
         + rIcon + ' Result</div>\n<span class="' + rCls + '">'
-        + esc(ev.output || '') + '</span>\n');
+        + esc(output) + '</span>\n');
 
       if (ev.success && ev.code) {
-        $('codePreview').textContent = ev.code;
+        $('codePreview').textContent = ev.code.slice(0, 3000);
         lastCodeContent = ev.code;
       }
 
@@ -1009,9 +1071,8 @@ function handleEvent(ev) {
         addActivity('❌', 'err', (ev.output || 'Error').slice(0, 80));
       }
 
-      // Terminal output for commands
       if (ev.output && ev.output.startsWith('$')) {
-        appendTerminal('<span style="color:var(--green)">' + esc(ev.output) + '</span>\n');
+        terminalHTML += '<span style="color:var(--green)">' + esc(output) + '</span>\n';
       }
       break;
 
@@ -1058,7 +1119,9 @@ function finish() {
   $('goalInput').disabled = false;
   $('progressBar').classList.remove('active');
   $('progressFill').style.width = '0%';
-  // Remove cursor blink
+  // Final flush
+  flushTokens();
+  // Remove cursor
   const cursor = $('codeArea').querySelector('.cursor-blink');
   if (cursor) cursor.remove();
 }
