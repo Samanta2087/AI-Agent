@@ -34,17 +34,21 @@ ALLOWED_EXTENSIONS = [
     ".xml", ".svg", ".lock", ".sum",
 ]
 
-# ─── SPEED OPTIMIZED Generation Parameters ─────────────────────
+# ─── GPU-ONLY Generation Parameters ─────────────────────────────
 CODER_OPTIONS = {
     "temperature": 0.15,       # Lower = faster, more deterministic
     "top_p": 0.85,
     "top_k": 30,               # Limit token sampling for speed
-    "num_predict": 4096,       # Reduced from 8192 — still enough for most actions
-    "num_ctx": 8192,           # Reduced from 16384 — big speed improvement
-    "repeat_penalty": 1.05,    # Slightly lower for speed
-    "num_gpu": 99,             # Offload all layers to GPU
-    "num_thread": 8,           # Use multiple CPU threads
-    "mirostat": 0,             # Disable mirostat for speed
+    "num_predict": 4096,       # Enough for most actions
+    "num_ctx": 8192,           # Balanced context window
+    "repeat_penalty": 1.05,
+    "num_gpu": 99,             # ★ ALL layers on GPU — no CPU inference
+    "main_gpu": 0,             # ★ Use primary GPU (device 0)
+    "num_thread": 1,           # ★ Minimal CPU threads (GPU handles everything)
+    "num_batch": 512,          # ★ Larger batch = faster prompt processing on GPU
+    "mirostat": 0,
+    "low_vram": False,         # ★ Don't save VRAM — use full GPU memory for speed
+    "f16_kv": True,            # ★ FP16 KV cache on GPU — faster + less VRAM
 }
 
 REVIEWER_OPTIONS = {
@@ -52,6 +56,9 @@ REVIEWER_OPTIONS = {
     "top_p": 0.9,
     "num_predict": 2048,
     "num_ctx": 4096,
-    "num_gpu": 99,
-    "num_thread": 8,
+    "num_gpu": 99,             # ★ ALL layers on GPU
+    "main_gpu": 0,             # ★ Use primary GPU
+    "num_thread": 1,           # ★ Minimal CPU threads
+    "num_batch": 512,          # ★ Larger batch for speed
+    "f16_kv": True,            # ★ FP16 KV cache
 }
