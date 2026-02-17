@@ -6,8 +6,8 @@ import os
 # ─── Ollama Connection ──────────────────────────────────────────
 OLLAMA_BASE_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
-# ─── Models ─────────────────────────────────────────────────────
-CODER_MODEL = os.getenv("CODER_MODEL", "qwen2.5-coder:32b-instruct-q3_K_M")
+# ─── Models (Single 14b for everything — fits 16GB GPU fully) ───
+CODER_MODEL = os.getenv("CODER_MODEL", "qwen2.5-coder:14b")
 REVIEWER_MODEL = os.getenv("REVIEWER_MODEL", "qwen2.5-coder:14b")
 
 # ─── Workspace ──────────────────────────────────────────────────
@@ -34,28 +34,26 @@ ALLOWED_EXTENSIONS = [
     ".xml", ".svg", ".lock", ".sum",
 ]
 
-# ─── GPU + CPU HYBRID (Partial Offload for 16GB GPU) ────────────
+# ─── FULL GPU (14b = ~9GB, fits easily in 16GB) ────────────────
 
-# 32b Coder → 40 layers on GPU (~10GB), rest on CPU RAM
+# 14b Coder → Full GPU with large context
 CODER_OPTIONS = {
     "temperature": 0.15,
     "top_p": 0.85,
     "top_k": 30,
     "num_predict": 4096,
-    "num_ctx": 4096,           # Moderate context (saves VRAM for layers)
-    "num_gpu": 40,             # ★ 40 layers GPU, ~25 layers CPU
-    "num_thread": 8,           # ★ CPU threads for the CPU layers
+    "num_ctx": 8192,           # Full context — plenty of VRAM
+    "num_gpu": 99,             # ALL layers on GPU
 }
 
-# 14b Reviewer → 40 layers on GPU (~6GB), rest on CPU
+# 14b Reviewer → Same model, no reload needed!
 REVIEWER_OPTIONS = {
     "temperature": 0.3,
     "top_p": 0.9,
     "num_predict": 2048,
-    "num_ctx": 2048,
-    "num_gpu": 40,             # ★ Partial GPU offload
-    "num_thread": 8,
+    "num_ctx": 4096,
+    "num_gpu": 99,
 }
 
-# Unload model after response to free VRAM for the other model
-KEEP_ALIVE = 0
+# Same model = no unload/reload needed = FAST
+KEEP_ALIVE = "5m"
