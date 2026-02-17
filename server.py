@@ -17,6 +17,7 @@ from config import (
     OLLAMA_BASE_URL,
     CODER_MODEL,
     CODER_OPTIONS,
+    KEEP_ALIVE,
     WORKSPACE_DIR,
     MAX_ITERATIONS,
 )
@@ -170,23 +171,26 @@ def run_agent_task(goal: str):
         current_section = "thinking"
 
         try:
-            # Extract keep_alive from options (goes at top level in Ollama API)
-            coder_opts = {k: v for k, v in CODER_OPTIONS.items() if k != "keep_alive"}
-            keep_alive = CODER_OPTIONS.get("keep_alive", "5m")
-
             resp = requests.post(
                 f"{OLLAMA_BASE_URL}/api/chat",
                 json={
                     "model": CODER_MODEL,
                     "messages": messages,
                     "stream": True,
-                    "options": coder_opts,
-                    "keep_alive": keep_alive,  # ★ Unload after response
+                    "options": CODER_OPTIONS,
+                    "keep_alive": KEEP_ALIVE,
                 },
                 timeout=600,
                 stream=True,
             )
-            resp.raise_for_status()
+            # ★ Capture actual error body from Ollama
+            if resp.status_code != 200:
+                try:
+                    err_body = resp.text[:500]
+                except:
+                    err_body = f"HTTP {resp.status_code}"
+                emit({"type": "error", "message": f"Ollama returned {resp.status_code}: {err_body}"})
+                return
 
             # Detect sections and stream tokens
             for line in resp.iter_lines():
@@ -231,7 +235,7 @@ def run_agent_task(goal: str):
                     continue
 
         except requests.exceptions.ConnectionError:
-            emit({"type": "error", "message": "Cannot connect to Ollama."})
+            emit({"type": "error", "message": "Cannot connect to Ollama. Is it running?"})
             return
         except Exception as e:
             emit({"type": "error", "message": f"Ollama error: {e}"})

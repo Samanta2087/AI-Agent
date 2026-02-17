@@ -1,5 +1,5 @@
 """
-Autonomous Coding Agent — Configuration (Speed Optimized)
+Autonomous Coding Agent — Configuration
 """
 import os
 
@@ -34,41 +34,26 @@ ALLOWED_EXTENSIONS = [
     ".xml", ".svg", ".lock", ".sum",
 ]
 
-# ─── GPU SEQUENTIAL OPTIMIZATION (Force 1 model at a time) ─────
+# ─── MINIMAL SAFE OPTIONS (stripped to fix Ollama 500 errors) ───
 
-# 32b Coder Model → Full GPU (VRAM-safe for 16GB)
+# 32b Coder — only basic params that Ollama always supports
 CODER_OPTIONS = {
     "temperature": 0.15,
     "top_p": 0.85,
     "top_k": 30,
-    "num_predict": 2048,       # ★ Reduced to save VRAM
-    "num_ctx": 2048,           # ★ Small context — 32b model needs ~14GB for weights alone
+    "num_predict": 2048,
+    "num_ctx": 2048,
     "num_gpu": 99,
-    "main_gpu": 0,
-    "num_thread": 4,           # ★ CPU assists with small tasks
-    "num_batch": 64,           # ★ Tiny batch — saves VRAM
-    "f16_kv": True,            # ★ Half-precision KV cache
-    "low_vram": True,          # ★ CRITICAL for 16GB card
-    "keep_alive": 0,
 }
 
-# 14b Reviewer Model → Full GPU
+# 14b Reviewer — minimal
 REVIEWER_OPTIONS = {
     "temperature": 0.3,
     "top_p": 0.9,
-    "num_predict": 2048,
-    "num_ctx": 4096,
-    "num_gpu": 99,             # ★ Both on GPU
-    "main_gpu": 0,
-    "num_thread": 1,
-    "f16_kv": True,
-    "keep_alive": 0,           # ★ Force unload to let coder load back
+    "num_predict": 1024,
+    "num_ctx": 2048,
+    "num_gpu": 99,
 }
 
-
-
-# Note: Web server (server.py) runs on CPU automatically.
-# Python HTTP + SSE streaming = lightweight CPU work.
-# All AI inference = GPU only.
-
-
+# keep_alive passed at top-level in API calls (not inside options)
+KEEP_ALIVE = 0
