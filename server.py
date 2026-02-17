@@ -170,13 +170,18 @@ def run_agent_task(goal: str):
         current_section = "thinking"
 
         try:
+            # Extract keep_alive from options (goes at top level in Ollama API)
+            coder_opts = {k: v for k, v in CODER_OPTIONS.items() if k != "keep_alive"}
+            keep_alive = CODER_OPTIONS.get("keep_alive", "5m")
+
             resp = requests.post(
                 f"{OLLAMA_BASE_URL}/api/chat",
                 json={
                     "model": CODER_MODEL,
                     "messages": messages,
                     "stream": True,
-                    "options": CODER_OPTIONS,
+                    "options": coder_opts,
+                    "keep_alive": keep_alive,  # ★ Unload after response
                 },
                 timeout=600,
                 stream=True,

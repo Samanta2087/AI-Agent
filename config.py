@@ -34,32 +34,36 @@ ALLOWED_EXTENSIONS = [
     ".xml", ".svg", ".lock", ".sum",
 ]
 
-# ─── HYBRID VRAM OPTIMIZATION (For 16GB GPU) ──────────────────
+# ─── GPU SEQUENTIAL OPTIMIZATION (Force 1 model at a time) ─────
 
-# 32b Coder Model → Partial GPU Offload (To fit in 16GB)
+# 32b Coder Model → Full GPU
 CODER_OPTIONS = {
     "temperature": 0.15,
     "top_p": 0.85,
     "top_k": 30,
     "num_predict": 4096,
-    "num_ctx": 4096,           # ★ Context 4k (16GB কার্ডে 8k ধরবে না)
-    "num_gpu": 32,             # ★ কুইক লোডিং এর জন্য ৩২টি লেয়ার GPU-তে
+    "num_ctx": 8192,
+    "num_gpu": 99,             # ★ Both on GPU
     "main_gpu": 0,
-    "num_thread": 4,           # ★ CPU + GPU কম্বিনেশন
-    "num_batch": 128,          # ★ ছোট ব্যাচ মেমোরি বাঁচাবে
-    "low_vram": True,          # ★ মাস্ট ট্রু হতে হবে ১৬জিবি-র জন্য
+    "num_thread": 1,
+    "num_batch": 512,
     "f16_kv": True,
+    "keep_alive": 0,           # ★ Force unload after response for VRAM safety
 }
 
-# 14b Reviewer Model → CPU Only (To avoid GPU crash)
+# 14b Reviewer Model → Full GPU
 REVIEWER_OPTIONS = {
     "temperature": 0.3,
     "top_p": 0.9,
-    "num_predict": 1024,
-    "num_ctx": 2048,
-    "num_gpu": 0,              # ★ এটি CPU-তে চলবে যাতে 32b মডেলটি জায়গা পায়
-    "num_thread": 8,
+    "num_predict": 2048,
+    "num_ctx": 4096,
+    "num_gpu": 99,             # ★ Both on GPU
+    "main_gpu": 0,
+    "num_thread": 1,
+    "f16_kv": True,
+    "keep_alive": 0,           # ★ Force unload to let coder load back
 }
+
 
 
 # Note: Web server (server.py) runs on CPU automatically.

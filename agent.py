@@ -136,8 +136,16 @@ def parse_action(response_text: str) -> Optional[dict]:
 
 
 # ─── Ollama Chat ────────────────────────────────────────────────
+def _get_coder_opts():
+    """Get coder options with keep_alive separated."""
+    opts = {k: v for k, v in CODER_OPTIONS.items() if k != "keep_alive"}
+    ka = CODER_OPTIONS.get("keep_alive", "5m")
+    return opts, ka
+
+
 def chat_with_ollama(messages: list[dict]) -> str:
     """Send messages to Ollama and get response."""
+    opts, keep_alive = _get_coder_opts()
     try:
         response = requests.post(
             f"{OLLAMA_BASE_URL}/api/chat",
@@ -145,9 +153,10 @@ def chat_with_ollama(messages: list[dict]) -> str:
                 "model": CODER_MODEL,
                 "messages": messages,
                 "stream": False,
-                "options": CODER_OPTIONS,
+                "options": opts,
+                "keep_alive": keep_alive,  # ★ Unload after response
             },
-            timeout=600,  # 10 min for complex reasoning
+            timeout=600,
         )
         response.raise_for_status()
         data = response.json()
@@ -167,6 +176,7 @@ def chat_with_ollama(messages: list[dict]) -> str:
 # ─── Streaming Chat (for visual feedback) ───────────────────────
 def chat_with_ollama_stream(messages: list[dict]) -> str:
     """Send messages and stream the response with live output."""
+    opts, keep_alive = _get_coder_opts()
     try:
         response = requests.post(
             f"{OLLAMA_BASE_URL}/api/chat",
@@ -174,7 +184,8 @@ def chat_with_ollama_stream(messages: list[dict]) -> str:
                 "model": CODER_MODEL,
                 "messages": messages,
                 "stream": True,
-                "options": CODER_OPTIONS,
+                "options": opts,
+                "keep_alive": keep_alive,  # ★ Unload after response
             },
             timeout=600,
             stream=True,
