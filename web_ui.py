@@ -1,589 +1,1075 @@
 """
-Autonomous Coding Agent — Web UI
-A sleek terminal-in-browser interface for the agent.
+Autonomous Coding Agent — Production Web UI
+Premium dark-mode interface with real-time code streaming.
 """
-import os
-import json
-import threading
-import subprocess
-import sys
-from datetime import datetime
-from http.server import HTTPServer, SimpleHTTPRequestHandler
-from pathlib import Path
-
-from config import OLLAMA_BASE_URL, CODER_MODEL, REVIEWER_MODEL, WORKSPACE_DIR
+from config import CODER_MODEL, REVIEWER_MODEL
 
 
-WEB_PORT = int(os.getenv("WEB_PORT", "8080"))
+def get_html():
+    """Return the production HTML with config values injected."""
+    return HTML_PAGE.replace("__CODER_MODEL__", CODER_MODEL).replace("__REVIEWER_MODEL__", REVIEWER_MODEL)
 
 
-HTML_TEMPLATE = r"""<!DOCTYPE html>
+HTML_PAGE = r'''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🤖 Autonomous Coding Agent</title>
+<title>Autonomous Coding Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@300;400;500;600;700&display=swap');
+:root {
+  --bg-0: #08090d;
+  --bg-1: #0c0e14;
+  --bg-2: #12151e;
+  --bg-3: #181c28;
+  --bg-4: #1e2333;
+  --bg-hover: #252a3a;
+  --border-1: #1e2333;
+  --border-2: #2a3040;
+  --border-active: #4c7bf5;
+  --text-0: #f0f2f5;
+  --text-1: #c8cdd8;
+  --text-2: #8b92a8;
+  --text-3: #5a6178;
+  --accent: #4c7bf5;
+  --accent-dim: rgba(76,123,245,0.12);
+  --green: #2dd4a0;
+  --green-dim: rgba(45,212,160,0.1);
+  --red: #f5564c;
+  --red-dim: rgba(245,86,76,0.1);
+  --yellow: #f5c842;
+  --yellow-dim: rgba(245,200,66,0.1);
+  --purple: #a78bfa;
+  --cyan: #22d3ee;
+  --orange: #fb923c;
+  --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
 
-  :root {
-    --bg-primary: #0a0e17;
-    --bg-secondary: #111827;
-    --bg-card: #1a1f2e;
-    --bg-input: #0d1117;
-    --border: #2d3748;
-    --border-active: #4f8ff7;
-    --text-primary: #e2e8f0;
-    --text-secondary: #94a3b8;
-    --text-dim: #64748b;
-    --accent-blue: #4f8ff7;
-    --accent-green: #22c55e;
-    --accent-red: #ef4444;
-    --accent-yellow: #eab308;
-    --accent-purple: #a78bfa;
-    --accent-cyan: #06b6d4;
-    --gradient-hero: linear-gradient(135deg, #4f8ff7 0%, #a78bfa 50%, #06b6d4 100%);
-    --shadow-glow: 0 0 30px rgba(79, 143, 247, 0.15);
-  }
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { height: 100%; overflow: hidden; }
 
-  * { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: var(--sans);
+  background: var(--bg-0);
+  color: var(--text-1);
+}
 
-  body {
-    font-family: 'Inter', sans-serif;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    min-height: 100vh;
-    overflow-x: hidden;
-  }
+/* ═══════ LAYOUT ═══════ */
+.app {
+  display: grid;
+  grid-template-rows: 52px 1fr 32px;
+  grid-template-columns: 280px 1fr 340px;
+  grid-template-areas:
+    "header header header"
+    "sidebar main panel"
+    "footer footer footer";
+  height: 100vh;
+}
 
-  /* ─── Header ─── */
-  .header {
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
-    padding: 16px 32px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    backdrop-filter: blur(10px);
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
+/* ═══════ HEADER ═══════ */
+.header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-1);
+  z-index: 100;
+}
 
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
+.header-left { display: flex; align-items: center; gap: 14px; }
 
-  .logo {
-    font-size: 24px;
-    font-weight: 700;
-    background: var(--gradient-hero);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    letter-spacing: -0.5px;
-  }
+.logo {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-0);
+  letter-spacing: -0.3px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
-  .status-badge {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 500;
-    background: rgba(34, 197, 94, 0.1);
-    color: var(--accent-green);
-    border: 1px solid rgba(34, 197, 94, 0.2);
-  }
+.logo-icon {
+  width: 26px; height: 26px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+}
 
-  .status-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--accent-green);
-    animation: pulse 2s infinite;
-  }
+.status-pill {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--mono);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
 
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-  }
+.status-pill.idle { background: var(--bg-3); color: var(--text-3); }
+.status-pill.running { background: var(--accent-dim); color: var(--accent); }
+.status-pill.done { background: var(--green-dim); color: var(--green); }
+.status-pill.error { background: var(--red-dim); color: var(--red); }
 
-  .header-info {
-    display: flex; gap: 24px;
-    font-size: 12px;
-    color: var(--text-dim);
-    font-family: 'JetBrains Mono', monospace;
-  }
+.status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
 
-  .info-item { display: flex; align-items: center; gap: 6px; }
-  .info-label { color: var(--text-dim); }
-  .info-value { color: var(--text-secondary); }
+.status-pill.running .status-dot { animation: blink 1s ease infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-  /* ─── Main Layout ─── */
-  .main {
-    display: grid;
+.header-center {
+  display: flex; align-items: center; gap: 16px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-3);
+}
+
+.header-center .sep { color: var(--border-2); }
+
+.header-right { display: flex; align-items: center; gap: 10px; }
+
+.model-tag {
+  font-size: 10px;
+  font-family: var(--mono);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-3);
+  color: var(--text-2);
+  border: 1px solid var(--border-1);
+}
+
+/* ═══════ SIDEBAR ═══════ */
+.sidebar {
+  grid-area: sidebar;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border-1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-section {
+  padding: 14px 16px 8px;
+  flex-shrink: 0;
+}
+
+.sidebar-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-3);
+  margin-bottom: 10px;
+}
+
+.goal-input-wrap {
+  position: relative;
+}
+
+.goal-input {
+  width: 100%;
+  min-height: 80px;
+  max-height: 140px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  color: var(--text-0);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  transition: border-color .2s;
+}
+
+.goal-input:focus { border-color: var(--accent); }
+.goal-input::placeholder { color: var(--text-3); }
+
+.btn-row { display: flex; gap: 6px; margin-top: 8px; }
+
+.btn {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: var(--radius-sm);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all .15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.btn-run {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-run:hover { background: #5d88f7; }
+.btn-run:disabled { opacity: .4; cursor: not-allowed; }
+
+.btn-stop {
+  background: var(--red-dim);
+  color: var(--red);
+  border: 1px solid rgba(245,86,76,.2);
+  display: none;
+}
+.btn-stop:hover { background: rgba(245,86,76,.2); }
+
+.divider {
+  height: 1px;
+  background: var(--border-1);
+  margin: 4px 0;
+}
+
+/* File tree */
+.file-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px 12px;
+}
+
+.file-tree::-webkit-scrollbar { width: 4px; }
+.file-tree::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 2px;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background .12s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-item:hover { background: var(--bg-hover); color: var(--text-1); }
+.file-item.active { background: var(--accent-dim); color: var(--accent); }
+.file-icon { font-size: 13px; flex-shrink: 0; }
+
+/* Activity feed */
+.activity-section {
+  flex-shrink: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 0 8px 12px;
+}
+
+.activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--text-2);
+  border-radius: var(--radius-sm);
+}
+
+.activity-icon {
+  flex-shrink: 0;
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px;
+  margin-top: 1px;
+}
+
+.activity-icon.create { background: var(--green-dim); color: var(--green); }
+.activity-icon.edit { background: var(--accent-dim); color: var(--accent); }
+.activity-icon.cmd { background: var(--yellow-dim); color: var(--yellow); }
+.activity-icon.err { background: var(--red-dim); color: var(--red); }
+.activity-icon.git { background: rgba(167,139,250,.1); color: var(--purple); }
+.activity-icon.done { background: var(--green-dim); color: var(--green); }
+
+.activity-text { line-height: 1.45; word-break: break-word; }
+.activity-time { color: var(--text-3); font-family: var(--mono); font-size: 10px; margin-left: auto; flex-shrink:0; }
+
+/* ═══════ MAIN PANEL ═══════ */
+.main-panel {
+  grid-area: main;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+  height: 36px;
+  gap: 0;
+}
+
+.tab {
+  padding: 0 14px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text-3);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all .15s;
+  white-space: nowrap;
+}
+
+.tab:hover { color: var(--text-2); }
+.tab.active {
+  color: var(--text-0);
+  border-bottom-color: var(--accent);
+}
+
+.tab-icon { font-size: 12px; }
+
+/* Code area */
+.code-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  scroll-behavior: smooth;
+}
+
+.code-area::-webkit-scrollbar { width: 6px; }
+.code-area::-webkit-scrollbar-track { background: transparent; }
+.code-area::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 3px;
+}
+
+/* Streaming tokens */
+.token { color: var(--text-1); }
+.token-thinking { color: var(--cyan); opacity: .85; }
+.token-plan { color: var(--purple); }
+.token-action { color: var(--green); font-weight: 500; }
+.token-code { color: var(--yellow); }
+.token-error { color: var(--red); }
+
+.cursor-blink {
+  display: inline-block;
+  width: 7px; height: 15px;
+  background: var(--accent);
+  animation: cursorBlink .8s step-end infinite;
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  border-radius: 1px;
+}
+
+@keyframes cursorBlink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+.iteration-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  margin: 12px 0;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.iteration-banner::before,
+.iteration-banner::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-1);
+}
+
+.section-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  margin: 8px 0 4px;
+}
+
+.section-marker.thinking { background: rgba(34,211,238,.08); color: var(--cyan); }
+.section-marker.plan { background: rgba(167,139,250,.08); color: var(--purple); }
+.section-marker.action { background: rgba(45,212,160,.08); color: var(--green); }
+.section-marker.result { background: rgba(245,200,66,.08); color: var(--yellow); }
+.section-marker.error { background: var(--red-dim); color: var(--red); }
+.section-marker.done { background: var(--green-dim); color: var(--green); }
+
+/* ═══════ RIGHT PANEL ═══════ */
+.right-panel {
+  grid-area: panel;
+  background: var(--bg-1);
+  border-left: 1px solid var(--border-1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+}
+
+.panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-3);
+}
+
+/* Stats grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 12px 16px;
+  flex-shrink: 0;
+}
+
+.stat-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 800;
+  font-family: var(--mono);
+  color: var(--text-0);
+}
+
+.stat-card.highlight .stat-value { color: var(--accent); }
+.stat-card.success .stat-value { color: var(--green); }
+.stat-card.warn .stat-value { color: var(--yellow); }
+.stat-card.danger .stat-value { color: var(--red); }
+
+/* Current action */
+.current-action {
+  padding: 12px 16px;
+  flex-shrink: 0;
+}
+
+.action-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius);
+  padding: 14px;
+  min-height: 60px;
+}
+
+.action-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+
+.action-name {
+  font-size: 13px;
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--green);
+  margin-bottom: 4px;
+}
+
+.action-detail {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+/* Code preview */
+.code-preview-section {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0 16px 12px;
+}
+
+.code-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.code-preview {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg-0);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.code-preview::-webkit-scrollbar { width: 4px; }
+.code-preview::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 2px;
+}
+
+/* Progress bar */
+.progress-bar {
+  height: 2px;
+  background: var(--bg-3);
+  position: relative;
+  flex-shrink: 0;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--purple));
+  width: 0%;
+  transition: width .3s;
+  border-radius: 1px;
+}
+
+.progress-bar.active .progress-fill {
+  animation: progressPulse 2s ease-in-out infinite;
+}
+
+@keyframes progressPulse {
+  0% { opacity: .6; }
+  50% { opacity: 1; }
+  100% { opacity: .6; }
+}
+
+/* ═══════ FOOTER ═══════ */
+.footer {
+  grid-area: footer;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border-1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-3);
+}
+
+.footer-left, .footer-right { display: flex; align-items: center; gap: 16px; }
+.footer-item { display: flex; align-items: center; gap: 4px; }
+.footer-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+/* ═══════ RESPONSIVE ═══════ */
+@media (max-width: 1100px) {
+  .app {
     grid-template-columns: 1fr;
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 24px;
-    gap: 24px;
+    grid-template-areas:
+      "header"
+      "main"
+      "footer";
   }
+  .sidebar, .right-panel { display: none; }
+}
 
-  /* ─── Goal Input ─── */
-  .goal-section {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 24px;
-    box-shadow: var(--shadow-glow);
-  }
-
-  .section-title {
-    font-size: 14px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    color: var(--accent-blue);
-    margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .goal-input {
-    width: 100%;
-    min-height: 100px;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px;
-    color: var(--text-primary);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
-    line-height: 1.6;
-    resize: vertical;
-    outline: none;
-    transition: border-color 0.3s, box-shadow 0.3s;
-  }
-
-  .goal-input:focus {
-    border-color: var(--border-active);
-    box-shadow: 0 0 0 3px rgba(79, 143, 247, 0.1);
-  }
-
-  .goal-input::placeholder {
-    color: var(--text-dim);
-  }
-
-  .goal-actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 16px;
-  }
-
-  .btn {
-    padding: 10px 24px;
-    border-radius: 10px;
-    font-family: 'Inter', sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-    transition: all 0.3s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .btn-primary {
-    background: var(--gradient-hero);
-    color: white;
-    box-shadow: 0 4px 15px rgba(79, 143, 247, 0.3);
-  }
-
-  .btn-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(79, 143, 247, 0.4);
-  }
-
-  .btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-  }
-
-  .btn-secondary {
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    border: 1px solid var(--border);
-  }
-
-  .btn-secondary:hover {
-    border-color: var(--accent-blue);
-    color: var(--text-primary);
-  }
-
-  .btn-danger {
-    background: rgba(239, 68, 68, 0.1);
-    color: var(--accent-red);
-    border: 1px solid rgba(239, 68, 68, 0.2);
-  }
-
-  .btn-danger:hover {
-    background: rgba(239, 68, 68, 0.2);
-  }
-
-  /* ─── Output Terminal ─── */
-  .terminal-section {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    overflow: hidden;
-  }
-
-  .terminal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 20px;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .terminal-dots {
-    display: flex; gap: 6px;
-  }
-
-  .terminal-dot {
-    width: 10px; height: 10px;
-    border-radius: 50%;
-  }
-
-  .dot-red { background: #ef4444; }
-  .dot-yellow { background: #eab308; }
-  .dot-green { background: #22c55e; }
-
-  .terminal-title {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: var(--text-dim);
-  }
-
-  .terminal-body {
-    height: 500px;
-    overflow-y: auto;
-    padding: 16px 20px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    line-height: 1.7;
-    background: var(--bg-input);
-    scroll-behavior: smooth;
-  }
-
-  .terminal-body::-webkit-scrollbar { width: 6px; }
-  .terminal-body::-webkit-scrollbar-track { background: transparent; }
-  .terminal-body::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 3px;
-  }
-
-  .log-line { margin-bottom: 2px; white-space: pre-wrap; word-break: break-all; }
-  .log-thinking { color: var(--accent-cyan); }
-  .log-action { color: var(--accent-green); font-weight: 500; }
-  .log-error { color: var(--accent-red); }
-  .log-info { color: var(--text-dim); }
-  .log-success { color: var(--accent-green); }
-  .log-tool { color: var(--accent-yellow); }
-  .log-step {
-    color: var(--accent-purple);
-    font-weight: 700;
-    padding: 8px 0;
-    border-top: 1px solid var(--border);
-    margin-top: 8px;
-  }
-
-  /* ─── Stats Bar ─── */
-  .stats-bar {
-    display: flex;
-    gap: 16px;
-    padding: 12px 20px;
-    background: var(--bg-secondary);
-    border-top: 1px solid var(--border);
-  }
-
-  .stat {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 12px;
-    color: var(--text-dim);
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .stat-value {
-    color: var(--text-primary);
-    font-weight: 600;
-  }
-
-  /* ─── Responsive ─── */
-  @media (max-width: 768px) {
-    .main { padding: 12px; }
-    .header { padding: 12px 16px; }
-    .header-info { display: none; }
-    .terminal-body { height: 400px; }
-  }
+/* ═══════ SCROLLBAR GLOBAL ═══════ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <div class="header-left">
-    <div class="logo">🤖 Coding Agent</div>
-    <div class="status-badge" id="statusBadge">
-      <div class="status-dot"></div>
-      <span id="statusText">Ready</span>
-    </div>
-  </div>
-  <div class="header-info">
-    <div class="info-item">
-      <span class="info-label">Coder:</span>
-      <span class="info-value" id="coderModel">CODER_MODEL</span>
-    </div>
-    <div class="info-item">
-      <span class="info-label">Reviewer:</span>
-      <span class="info-value" id="reviewerModel">REVIEWER_MODEL</span>
-    </div>
-  </div>
-</div>
-
-<div class="main">
-  <div class="goal-section">
-    <div class="section-title">📋 Goal</div>
-    <textarea
-      class="goal-input"
-      id="goalInput"
-      placeholder="Enter your coding goal...&#10;&#10;Examples:&#10;• Create a FastAPI backend with JWT auth and SQLite&#10;• Fix the bug in src/auth.py — login returns 500&#10;• Add unit tests for the utils module"
-    ></textarea>
-    <div class="goal-actions">
-      <div style="display:flex; gap:8px;">
-        <button class="btn btn-primary" id="startBtn" onclick="startAgent()">
-          ▶ Start Agent
-        </button>
-        <button class="btn btn-danger" id="stopBtn" onclick="stopAgent()" style="display:none;">
-          ⏹ Stop
-        </button>
+<div class="app">
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">
+        <div class="logo-icon">⚡</div>
+        Coding Agent
       </div>
-      <button class="btn btn-secondary" onclick="clearTerminal()">
-        🗑 Clear
-      </button>
+      <div class="status-pill idle" id="statusPill">
+        <div class="status-dot"></div>
+        <span id="statusLabel">IDLE</span>
+      </div>
+    </div>
+    <div class="header-center">
+      <span>Iteration <strong id="hdrIter" style="color:var(--text-1)">0</strong></span>
+      <span class="sep">│</span>
+      <span id="hdrTimer">00:00</span>
+      <span class="sep">│</span>
+      <span>Tokens: <strong id="hdrTokens" style="color:var(--text-1)">0</strong></span>
+    </div>
+    <div class="header-right">
+      <div class="model-tag" title="Coder Model">🧠 __CODER_MODEL__</div>
+      <div class="model-tag" title="Reviewer Model">🔍 __REVIEWER_MODEL__</div>
     </div>
   </div>
 
-  <div class="terminal-section">
-    <div class="terminal-header">
-      <div class="terminal-dots">
-        <div class="terminal-dot dot-red"></div>
-        <div class="terminal-dot dot-yellow"></div>
-        <div class="terminal-dot dot-green"></div>
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">📋 Goal</div>
+      <div class="goal-input-wrap">
+        <textarea class="goal-input" id="goalInput"
+          placeholder="Describe your coding task..."></textarea>
       </div>
-      <div class="terminal-title">agent output</div>
-      <div style="font-size:12px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;">
-        <span id="iterCount">0</span> iterations
+      <div class="btn-row">
+        <button class="btn btn-run" id="btnRun" onclick="startAgent()">▶ Run</button>
+        <button class="btn btn-stop" id="btnStop" onclick="stopAgent()">⏹ Stop</button>
       </div>
     </div>
-    <div class="terminal-body" id="terminal"></div>
-    <div class="stats-bar">
-      <div class="stat">Steps: <span class="stat-value" id="statSteps">0</span></div>
-      <div class="stat">Files: <span class="stat-value" id="statFiles">0</span></div>
-      <div class="stat">Commands: <span class="stat-value" id="statCmds">0</span></div>
-      <div class="stat">Errors: <span class="stat-value" id="statErrors">0</span></div>
-      <div class="stat">Time: <span class="stat-value" id="statTime">0:00</span></div>
+    <div class="divider"></div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">📁 Workspace Files</div>
+    </div>
+    <div class="file-tree" id="fileTree">
+      <div style="padding:8px;color:var(--text-3);font-size:11px;font-style:italic;">No files yet</div>
+    </div>
+    <div class="divider"></div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">📌 Activity</div>
+    </div>
+    <div class="activity-section" id="activityFeed"></div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main-panel">
+    <div class="tabs">
+      <div class="tab active" data-tab="stream" onclick="switchTab('stream')">
+        <span class="tab-icon">⚡</span> Live Stream
+      </div>
+      <div class="tab" data-tab="code" onclick="switchTab('code')">
+        <span class="tab-icon">📄</span> Generated Code
+      </div>
+      <div class="tab" data-tab="terminal" onclick="switchTab('terminal')">
+        <span class="tab-icon">🖥</span> Terminal
+      </div>
+    </div>
+    <div class="progress-bar" id="progressBar">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div class="code-area" id="codeArea">
+      <span style="color:var(--text-3)">Waiting for goal...</span>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <div class="panel-header">
+      <div class="panel-title">📊 Dashboard</div>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card highlight">
+        <div class="stat-label">Iterations</div>
+        <div class="stat-value" id="statIter">0</div>
+      </div>
+      <div class="stat-card success">
+        <div class="stat-label">Files</div>
+        <div class="stat-value" id="statFiles">0</div>
+      </div>
+      <div class="stat-card warn">
+        <div class="stat-label">Commands</div>
+        <div class="stat-value" id="statCmds">0</div>
+      </div>
+      <div class="stat-card danger">
+        <div class="stat-label">Errors</div>
+        <div class="stat-value" id="statErrors">0</div>
+      </div>
+    </div>
+
+    <div class="current-action">
+      <div class="action-card">
+        <div class="action-label">🔥 Current Action</div>
+        <div class="action-name" id="curAction">—</div>
+        <div class="action-detail" id="curDetail"></div>
+      </div>
+    </div>
+
+    <div class="code-preview-section">
+      <div class="code-preview-header">
+        <div class="sidebar-label" style="margin:0">💻 Last Code Output</div>
+      </div>
+      <div class="code-preview" id="codePreview">No code generated yet.</div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <div class="footer-left">
+      <div class="footer-item">
+        <div class="footer-dot" id="footerDot"></div>
+        <span id="footerStatus">Ready</span>
+      </div>
+      <div class="footer-item">workspace/</div>
+    </div>
+    <div class="footer-right">
+      <div class="footer-item" id="footerModel">__CODER_MODEL__</div>
     </div>
   </div>
 </div>
 
 <script>
-  let ws = null;
-  let running = false;
-  let startTime = null;
-  let timerInterval = null;
-  let stats = { steps: 0, files: 0, cmds: 0, errors: 0 };
+const $ = id => document.getElementById(id);
 
-  function log(text, cls = '') {
-    const terminal = document.getElementById('terminal');
-    const line = document.createElement('div');
-    line.className = 'log-line ' + cls;
-    line.textContent = text;
-    terminal.appendChild(line);
-    terminal.scrollTop = terminal.scrollHeight;
+let running = false;
+let startTime = null;
+let timerInt = null;
+let tokenCount = 0;
+let stats = { iter: 0, files: 0, cmds: 0, errors: 0 };
+let currentTab = 'stream';
+let tabContent = { stream: '', code: '', terminal: '' };
+let lastCodeContent = '';
+
+// ─── Tab switching ──────────────────────────────
+function switchTab(name) {
+  currentTab = name;
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === name);
+  });
+  renderTab();
+}
+
+function renderTab() {
+  const area = $('codeArea');
+  area.innerHTML = tabContent[currentTab] || '<span style="color:var(--text-3)">Nothing here yet</span>';
+  area.scrollTop = area.scrollHeight;
+}
+
+// ─── Status ─────────────────────────────────────
+function setStatus(label, type) {
+  const pill = $('statusPill');
+  pill.className = 'status-pill ' + type;
+  $('statusLabel').textContent = label;
+  $('footerStatus').textContent = label;
+  $('footerDot').style.background =
+    type === 'running' ? 'var(--accent)' :
+    type === 'done' ? 'var(--green)' :
+    type === 'error' ? 'var(--red)' : 'var(--text-3)';
+}
+
+function updateTimer() {
+  if (!startTime) return;
+  const s = Math.floor((Date.now() - startTime) / 1000);
+  const m = Math.floor(s / 60);
+  const ss = s % 60;
+  $('hdrTimer').textContent = m.toString().padStart(2,'0') + ':' + ss.toString().padStart(2,'0');
+}
+
+function updateStats() {
+  $('statIter').textContent = stats.iter;
+  $('statFiles').textContent = stats.files;
+  $('statCmds').textContent = stats.cmds;
+  $('statErrors').textContent = stats.errors;
+  $('hdrIter').textContent = stats.iter;
+}
+
+// ─── Activity feed ──────────────────────────────
+function addActivity(icon, cls, text) {
+  const feed = $('activityFeed');
+  const now = new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',hour12:false});
+  const item = document.createElement('div');
+  item.className = 'activity-item';
+  item.innerHTML = `
+    <div class="activity-icon ${cls}">${icon}</div>
+    <div class="activity-text">${esc(text)}</div>
+    <div class="activity-time">${now}</div>`;
+  feed.prepend(item);
+  if (feed.children.length > 50) feed.lastChild.remove();
+}
+
+// ─── Stream append ──────────────────────────────
+function appendStream(html) {
+  tabContent.stream += html;
+  if (currentTab === 'stream') {
+    const area = $('codeArea');
+    area.innerHTML = tabContent.stream + '<span class="cursor-blink"></span>';
+    area.scrollTop = area.scrollHeight;
   }
+}
 
-  function updateStats() {
-    document.getElementById('statSteps').textContent = stats.steps;
-    document.getElementById('statFiles').textContent = stats.files;
-    document.getElementById('statCmds').textContent = stats.cmds;
-    document.getElementById('statErrors').textContent = stats.errors;
+function appendTerminal(html) {
+  tabContent.terminal += html;
+  if (currentTab === 'terminal') renderTab();
+}
+
+function setCodeTab(html) {
+  tabContent.code = html;
+  if (currentTab === 'code') renderTab();
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─── File tree ──────────────────────────────────
+function refreshFiles(files) {
+  const tree = $('fileTree');
+  if (!files || files.length === 0) {
+    tree.innerHTML = '<div style="padding:8px;color:var(--text-3);font-size:11px;font-style:italic;">No files yet</div>';
+    return;
   }
+  tree.innerHTML = files.map(f => {
+    const icon = f.endsWith('/') ? '📁' :
+                 f.endsWith('.py') ? '🐍' :
+                 f.endsWith('.js') || f.endsWith('.ts') ? '📜' :
+                 f.endsWith('.html') ? '🌐' :
+                 f.endsWith('.css') ? '🎨' :
+                 f.endsWith('.json') ? '📋' :
+                 f.endsWith('.md') ? '📝' : '📄';
+    return `<div class="file-item" onclick="requestFile('${esc(f)}')" title="${esc(f)}">
+      <span class="file-icon">${icon}</span>${esc(f)}
+    </div>`;
+  }).join('');
+}
 
-  function updateTimer() {
-    if (!startTime) return;
-    const elapsed = Math.floor((Date.now() - startTime) / 1000);
-    const min = Math.floor(elapsed / 60);
-    const sec = elapsed % 60;
-    document.getElementById('statTime').textContent =
-      min + ':' + (sec < 10 ? '0' : '') + sec;
-  }
-
-  function setStatus(text, type) {
-    const badge = document.getElementById('statusBadge');
-    const dot = badge.querySelector('.status-dot');
-    const span = document.getElementById('statusText');
-    span.textContent = text;
-
-    badge.style.background = type === 'running'
-      ? 'rgba(79, 143, 247, 0.1)' : type === 'done'
-      ? 'rgba(34, 197, 94, 0.1)' : type === 'error'
-      ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)';
-
-    badge.style.color = dot.style.background = type === 'running'
-      ? '#4f8ff7' : type === 'done'
-      ? '#22c55e' : type === 'error'
-      ? '#ef4444' : '#22c55e';
-
-    badge.style.borderColor = type === 'running'
-      ? 'rgba(79, 143, 247, 0.2)' : type === 'done'
-      ? 'rgba(34, 197, 94, 0.2)' : type === 'error'
-      ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.2)';
-  }
-
-  async function startAgent() {
-    const goal = document.getElementById('goalInput').value.trim();
-    if (!goal) { alert('Please enter a goal.'); return; }
-
-    running = true;
-    stats = { steps: 0, files: 0, cmds: 0, errors: 0 };
-    startTime = Date.now();
-    timerInterval = setInterval(updateTimer, 1000);
-
-    document.getElementById('startBtn').style.display = 'none';
-    document.getElementById('stopBtn').style.display = 'flex';
-    document.getElementById('goalInput').disabled = true;
-    setStatus('Running...', 'running');
-
-    log('═══════════════════════════════════════════', 'log-step');
-    log('🤖 Agent Started', 'log-step');
-    log('Goal: ' + goal, 'log-info');
-    log('═══════════════════════════════════════════', 'log-step');
-
-    try {
-      const response = await fetch('/api/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goal }),
-      });
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const data = JSON.parse(line.slice(6));
-            handleEvent(data);
-          } catch(e) {}
-        }
+function requestFile(path) {
+  // File click → show in code tab
+  fetch('/api/file?path=' + encodeURIComponent(path))
+    .then(r => r.json())
+    .then(data => {
+      if (data.content !== undefined) {
+        setCodeTab('<div style="color:var(--text-3);margin-bottom:8px;font-size:11px;">📄 ' + esc(path) + '</div>'
+          + '<div style="color:var(--text-1)">' + esc(data.content) + '</div>');
+        switchTab('code');
       }
-    } catch(e) {
-      log('❌ Connection error: ' + e.message, 'log-error');
-      setStatus('Error', 'error');
+    }).catch(() => {});
+}
+
+// ─── Agent control ──────────────────────────────
+async function startAgent() {
+  const goal = $('goalInput').value.trim();
+  if (!goal) { $('goalInput').focus(); return; }
+
+  running = true;
+  stats = { iter: 0, files: 0, cmds: 0, errors: 0 };
+  tokenCount = 0;
+  tabContent = { stream: '', code: '', terminal: '' };
+  startTime = Date.now();
+  timerInt = setInterval(updateTimer, 1000);
+
+  $('btnRun').style.display = 'none';
+  $('btnStop').style.display = 'flex';
+  $('goalInput').disabled = true;
+  $('progressBar').classList.add('active');
+  $('progressFill').style.width = '100%';
+
+  setStatus('RUNNING', 'running');
+  updateStats();
+
+  appendStream('<div class="iteration-banner">Agent Starting</div>');
+  addActivity('🚀', 'create', 'Agent started: ' + goal.slice(0, 60));
+
+  try {
+    const resp = await fetch('/api/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ goal })
+    });
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { value, done: streamDone } = await reader.read();
+      if (streamDone) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          handleEvent(JSON.parse(line.slice(6)));
+        } catch(e) {}
+      }
     }
-
-    stopAgent();
+  } catch(e) {
+    appendStream('<div class="section-marker error">❌ CONNECTION ERROR</div>\n' + esc(e.message) + '\n');
+    setStatus('ERROR', 'error');
   }
+  finish();
+}
 
-  function handleEvent(data) {
-    switch(data.type) {
-      case 'iteration':
-        stats.steps++;
-        document.getElementById('iterCount').textContent = stats.steps;
-        log('', '');
-        log('══════ ITERATION ' + data.iteration + ' ══════', 'log-step');
-        break;
-      case 'thinking':
-        log('💭 ' + data.text, 'log-thinking');
-        break;
-      case 'action':
-        log('⚡ ACTION: ' + data.tool, 'log-action');
-        if (data.tool === 'run_command') stats.cmds++;
-        if (data.tool === 'create_file' || data.tool === 'edit_file') stats.files++;
-        break;
-      case 'result':
-        if (data.success) {
-          log('✅ ' + data.output, 'log-success');
-        } else {
-          log('❌ ' + data.output, 'log-error');
-          stats.errors++;
-        }
-        break;
-      case 'done':
-        log('', '');
-        log('══════════════════════════════════════', 'log-step');
-        log('✅ TASK COMPLETED', 'log-success');
-        log(data.summary || '', 'log-info');
-        setStatus('Done', 'done');
-        break;
-      case 'error':
-        log('❌ ERROR: ' + data.message, 'log-error');
+function handleEvent(ev) {
+  switch (ev.type) {
+
+    case 'iteration':
+      stats.iter = ev.iteration;
+      updateStats();
+      appendStream('\n<div class="iteration-banner">Iteration ' + ev.iteration + '</div>\n');
+      break;
+
+    case 'token':
+      tokenCount++;
+      $('hdrTokens').textContent = tokenCount;
+      const cls = ev.section === 'thinking' ? 'token-thinking' :
+                  ev.section === 'action' ? 'token-action' :
+                  ev.section === 'plan' ? 'token-plan' : 'token';
+      appendStream('<span class="' + cls + '">' + esc(ev.text) + '</span>');
+      break;
+
+    case 'section':
+      const sectionType = ev.name.toLowerCase();
+      appendStream('\n<div class="section-marker ' + sectionType + '">' + esc(ev.label) + '</div>\n');
+      break;
+
+    case 'action':
+      $('curAction').textContent = ev.tool;
+      $('curDetail').textContent = ev.detail || '';
+      addActivity(
+        ev.tool === 'create_file' ? '📄' :
+        ev.tool === 'edit_file' ? '✏️' :
+        ev.tool === 'run_command' ? '⚡' :
+        ev.tool === 'git' ? '📦' : '🔧',
+        ev.tool === 'run_command' ? 'cmd' :
+        ev.tool === 'create_file' ? 'create' :
+        ev.tool === 'edit_file' ? 'edit' :
+        ev.tool === 'git' ? 'git' : 'create',
+        ev.tool + ': ' + (ev.detail || '').slice(0, 80)
+      );
+      if (ev.tool === 'create_file' || ev.tool === 'edit_file') stats.files++;
+      if (ev.tool === 'run_command') stats.cmds++;
+      updateStats();
+      break;
+
+    case 'result':
+      const rIcon = ev.success ? '✅' : '❌';
+      const rCls = ev.success ? 'token' : 'token-error';
+      appendStream('\n<div class="section-marker ' + (ev.success ? 'result' : 'error') + '">'
+        + rIcon + ' Result</div>\n<span class="' + rCls + '">'
+        + esc(ev.output || '') + '</span>\n');
+
+      if (ev.success && ev.code) {
+        $('codePreview').textContent = ev.code;
+        lastCodeContent = ev.code;
+      }
+
+      if (!ev.success) {
         stats.errors++;
-        setStatus('Error', 'error');
-        break;
-      case 'log':
-        log(data.text, 'log-info');
-        break;
-    }
-    updateStats();
-  }
+        updateStats();
+        addActivity('❌', 'err', (ev.output || 'Error').slice(0, 80));
+      }
 
-  function stopAgent() {
-    running = false;
-    clearInterval(timerInterval);
-    document.getElementById('startBtn').style.display = 'flex';
-    document.getElementById('stopBtn').style.display = 'none';
-    document.getElementById('goalInput').disabled = false;
-    if (document.getElementById('statusText').textContent === 'Running...') {
-      setStatus('Stopped', 'error');
-    }
-    fetch('/api/stop', { method: 'POST' }).catch(() => {});
-  }
+      // Terminal output for commands
+      if (ev.output && ev.output.startsWith('$')) {
+        appendTerminal('<span style="color:var(--green)">' + esc(ev.output) + '</span>\n');
+      }
+      break;
 
-  function clearTerminal() {
-    document.getElementById('terminal').innerHTML = '';
-    stats = { steps: 0, files: 0, cmds: 0, errors: 0 };
-    updateStats();
-    document.getElementById('iterCount').textContent = '0';
-    document.getElementById('statTime').textContent = '0:00';
-  }
+    case 'files':
+      refreshFiles(ev.list || []);
+      break;
 
-  // Set model names from config
-  document.getElementById('coderModel').textContent = 'CODER_MODEL_PLACEHOLDER';
-  document.getElementById('reviewerModel').textContent = 'REVIEWER_MODEL_PLACEHOLDER';
+    case 'done':
+      appendStream('\n<div class="section-marker done">✅ TASK COMPLETED</div>\n'
+        + '<span class="token">' + esc(ev.summary || '') + '</span>\n');
+      $('curAction').textContent = '✅ Done';
+      $('curDetail').textContent = '';
+      addActivity('✅', 'done', 'Task completed');
+      setStatus('DONE', 'done');
+      break;
+
+    case 'error':
+      appendStream('\n<div class="section-marker error">❌ ERROR</div>\n'
+        + '<span class="token-error">' + esc(ev.message || '') + '</span>\n');
+      stats.errors++;
+      updateStats();
+      addActivity('❌', 'err', ev.message || 'Error');
+      setStatus('ERROR', 'error');
+      break;
+
+    case 'log':
+      appendStream('<span style="color:var(--text-3)">' + esc(ev.text || '') + '</span>\n');
+      break;
+  }
+}
+
+function stopAgent() {
+  fetch('/api/stop', { method: 'POST' }).catch(() => {});
+  finish();
+  setStatus('STOPPED', 'error');
+  addActivity('⏹', 'err', 'Agent stopped by user');
+}
+
+function finish() {
+  running = false;
+  clearInterval(timerInt);
+  $('btnRun').style.display = 'flex';
+  $('btnStop').style.display = 'none';
+  $('goalInput').disabled = false;
+  $('progressBar').classList.remove('active');
+  $('progressFill').style.width = '0%';
+  // Remove cursor blink
+  const cursor = $('codeArea').querySelector('.cursor-blink');
+  if (cursor) cursor.remove();
+}
+
+// ─── Keyboard shortcut ─────────────────────────
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault();
+    if (!running) startAgent();
+  }
+});
 </script>
 </body>
-</html>"""
-
-
-def get_html():
-    """Return the HTML with config values injected."""
-    return (HTML_TEMPLATE
-        .replace("CODER_MODEL_PLACEHOLDER", CODER_MODEL)
-        .replace("REVIEWER_MODEL_PLACEHOLDER", REVIEWER_MODEL))
+</html>'''
