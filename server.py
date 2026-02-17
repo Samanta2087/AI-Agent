@@ -29,7 +29,7 @@ from web_ui import get_html
 import requests
 
 
-WEB_PORT = int(os.getenv("WEB_PORT", "8080"))
+WEB_PORT = int(os.getenv("WEB_PORT", "8090"))
 
 # Global state
 agent_thread = None
