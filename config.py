@@ -36,19 +36,20 @@ ALLOWED_EXTENSIONS = [
 
 # ─── GPU SEQUENTIAL OPTIMIZATION (Force 1 model at a time) ─────
 
-# 32b Coder Model → Full GPU
+# 32b Coder Model → Full GPU (VRAM-safe for 16GB)
 CODER_OPTIONS = {
     "temperature": 0.15,
     "top_p": 0.85,
     "top_k": 30,
-    "num_predict": 4096,
-    "num_ctx": 8192,
-    "num_gpu": 99,             # ★ Both on GPU
+    "num_predict": 2048,       # ★ Reduced to save VRAM
+    "num_ctx": 2048,           # ★ Small context — 32b model needs ~14GB for weights alone
+    "num_gpu": 99,
     "main_gpu": 0,
-    "num_thread": 1,
-    "num_batch": 512,
-    "f16_kv": True,
-    "keep_alive": 0,           # ★ Force unload after response for VRAM safety
+    "num_thread": 4,           # ★ CPU assists with small tasks
+    "num_batch": 64,           # ★ Tiny batch — saves VRAM
+    "f16_kv": True,            # ★ Half-precision KV cache
+    "low_vram": True,          # ★ CRITICAL for 16GB card
+    "keep_alive": 0,
 }
 
 # 14b Reviewer Model → Full GPU
